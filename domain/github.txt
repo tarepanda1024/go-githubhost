@@ -1,5 +1,5 @@
 github.global.ssl.fastly.net
-www.github.com
+github.com
 assets-cdn.github.com
 assets-cdn.github.com
 assets-cdn.github.com
