@@ -1,34 +1,76 @@
 package runner
 
 import (
+	"bufio"
 	"fmt"
-	"sort"
+	"github.com/emirpasic/gods/sets/hashset"
+	"io"
+	"log"
+	"os"
+	"os/user"
+	"path"
+	"strings"
 )
 
-func Run() (text string, err error) {
-	domains, err := LoadFile("")
+func homeDir() string {
+	current, err := user.Current()
+	if nil == err {
+		return current.HomeDir
+	}
+	return ""
+}
+
+func replaceHosts(newHosts map[string]string) error {
+	hostPath := "/etc/hosts"
+	file, err := os.OpenFile(hostPath, os.O_RDWR, 0644)
 	if err != nil {
-		return "", err
+		log.Printf("Cannot open /etc/hosts, err: [%v]", err)
+		return err
+	}
+	defer file.Close()
+	pos := int64(0)
+	processHostSet := hashset.New()
+	scanner := bufio.NewReader(file)
+	for {
+		bytes, _, err := scanner.ReadLine()
+		if err == io.EOF {
+			break
+		}
+		line := string(bytes)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			hostItem := strings.Split(line, " ")
+			if len(hostItem) == 2 {
+				processHostSet.Add(hostItem[1])
+				newIp := newHosts[hostItem[1]]
+				if newIp != "" && newIp != "0.0.0.0" && newIp != hostItem[0] {
+					fmt.Printf("begin replace %s from %s to %s\n", hostItem[1], hostItem[0], newIp)
+					hostItem[0] = newIp
+					line = strings.Join(hostItem, " ")
+					file.WriteAt([]byte(line), pos)
+				}
+			}
+		}
+		pos += int64(len(line) + len("\n"))
 	}
 
-	addrMap := ParseAddr(domains)
-	var keys []string
-	for k := range addrMap {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if v, ok := addrMap[k]; ok {
-			text = fmt.Sprintf("%s%s", text, fmt.Sprintf("%s %s\n", v, k))
+	for k, v := range newHosts {
+		if !processHostSet.Contains(k) && v != "0.0.0.0" {
+			fmt.Printf("begin add host item : %s %s\n", v, k)
+			line := v + " " + k + "\n"
+			file.WriteAt([]byte(line), pos)
+			pos += int64(len(line))
 		}
 	}
 
-	cmd, err := FlushDNS()
+	return nil
+}
+
+func Run() error {
+	home := homeDir()
+	domains, err := LoadFile(path.Join(home, ".github.txt"))
 	if err != nil {
-		return
+		return err
 	}
-
-	text = fmt.Sprintf("%s\n%s", text, cmd)
-
-	return
+	addrMap := ParseAddr(domains)
+	return replaceHosts(addrMap)
 }
